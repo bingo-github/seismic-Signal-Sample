@@ -1,0 +1,152 @@
+#include "eint.h"
+#include "lpc17xx.h"
+#include "ads1256.h"
+#include "uart.h"
+#include "circlebuff.h"
+#include "timer.h"
+#include "rtc.h"
+
+uint8_t led_flag=0;
+
+extern uint32_t tc0Reset;
+extern uint8_t startAD_flag;
+extern uint16_t curSampleFreq;
+extern char posDate[6];
+extern char dateBuff[6];
+extern char adBuff[650];
+extern char dateBuffToASCII[13];
+extern char packet3_buffer[50];	
+
+/*********************************************************************************************************
+** Function name:       Init_EINT(uint8_t EINT_num)
+** Descriptions:        外部中断0初始化
+** input parameters:    无
+** output parameters:   无
+** Returned value:      无
+*********************************************************************************************************/
+void Init_EINT(uint8_t EINT_num)
+{
+	switch(EINT_num)
+	{
+		case EINT0:
+			LPC_PINCON->PINSEL4 |= (0x01 << 20);
+			LPC_SC->EXTMODE  |= (0x01 << 0);                                          /* 外部中断0选择为边沿触发      */
+			LPC_SC->EXTPOLAR &= ~(0x01 << 0);	                                        /* 下降沿触发中断               */
+			LPC_SC->EXTINT    = (0x01 << 0);                                         /* 清除外部中断0的中断标志      */
+			NVIC_EnableIRQ(EINT0_IRQn);
+			break;
+		case EINT1:
+			LPC_PINCON->PINSEL4 |= (0x01 << 22);
+			LPC_SC->EXTMODE  |= (0x01 << 1);                                          /* 外部中断1选择为边沿触发      */
+			LPC_SC->EXTPOLAR |= (0x01 << 1);	                                        /* 上升沿沿触发中断               */
+			LPC_SC->EXTINT    = (0x01 << 1);                                          /* 清除外部中断1的中断标志      */
+			NVIC_EnableIRQ(EINT1_IRQn);
+			break;
+		case EINT2:
+			LPC_PINCON->PINSEL4 |= (0x01 << 24);
+			LPC_SC->EXTMODE  |= (0x01 << 2);                                          /* 外部中断2选择为边沿触发      */
+			LPC_SC->EXTPOLAR |= (0x01 << 2);	                                        /* 上升沿触发中断               */
+			LPC_SC->EXTINT    = (0x01 << 2);                                          /* 清除外部中断2的中断标志      */
+			NVIC_EnableIRQ(EINT2_IRQn);
+			break;
+		case EINT3:
+			LPC_PINCON->PINSEL4 |= (0x01 << 26);
+			LPC_SC->EXTMODE  |= (0x01 << 3);                                          /* 外部中断3选择为边沿触发      */
+			LPC_SC->EXTPOLAR &= ~(0x01 << 3);	                                        /* 下降沿触发中断               */
+			LPC_SC->EXTINT    = (0x01 << 3);                                          /* 清除外部中断3的中断标志      */
+			NVIC_EnableIRQ(EINT3_IRQn);
+			break;
+		default:
+			break;
+	}
+}
+/*********************************************************************************************************
+* Function Name:        EINT0_IRQHandler
+* Description:          外部中断0中断处理函数
+* Input:                无
+* Output:               无
+* Return:               无
+*********************************************************************************************************/
+void EINT0_IRQHandler (void)																								//P2.10与ISP有关，请慎用该管脚的外部中断
+{
+  LPC_SC->EXTINT = (0x01 << 0);                                              /* 清除外部中断标志             */ 
+  /*******************中断函数*********************/
+	
+	/*******************中断函数*********************/
+}
+
+/*********************************************************************************************************
+* Function Name:        EINT1_IRQHandler
+* Description:          外部中断1中断处理函数
+* Input:                无
+* Output:               无
+* Return:               无
+*********************************************************************************************************/
+void EINT1_IRQHandler (void)
+{	
+  LPC_SC->EXTINT = (0x01 << 1);                                              /* 清除外部中断标志             */ 
+  /*******************中断函数*********************/
+	LPC_TIM0->TC = tc0Reset;																	//PPS信号每秒钟开始时进行TC的重置，使之不会随时间的延迟而产生误差
+	LPC_TIM1->TC = 0;																					//TC1没1毫秒加1，当PPS信号每秒钟开始是将TC1复位，重新开始计时
+	if(startAD_flag == 1)																			//判断是否开始进行AD采样
+	{
+		Enable_Timer(0);
+		startAD_flag = 0;
+	}
+			
+	dateBuff[0] = packet3_buffer[0];					//年								//将串口3中接收到的时间信息存到dateBuff中用于接下来一秒中使用
+	dateBuff[1] = packet3_buffer[1];					//月
+	dateBuff[2] = packet3_buffer[2];					//日
+	dateBuff[3] = packet3_buffer[3];					//时
+	dateBuff[4] = packet3_buffer[4];					//分
+	dateBuff[5] = packet3_buffer[5];					//秒
+	
+	LPC_RTC->SEC = packet3_buffer[5];
+	LPC_RTC->MIN = packet3_buffer[4];
+	LPC_RTC->HOUR = packet3_buffer[3];
+	LPC_RTC->DOM = packet3_buffer[2];
+	LPC_RTC->MONTH = packet3_buffer[1];
+	LPC_RTC->YEAR = 0x07D0+packet3_buffer[0];
+	RTC_Reset();
+	LPC_RTC->CCR = 1;  //开启RTC计数
+	LPC_RTC->ILR = 0X01;   //清除计数器增量中断和报警中断，注：例程中是仅仅将第一位写1，但本人认为两者均清除中断也行
+	
+	
+	/*******************中断函数*********************/
+	
+}
+
+/*********************************************************************************************************
+* Function Name:        EINT2_IRQHandler
+* Description:          外部中断2中断处理函数
+* Input:                无
+* Output:               无
+* Return:               无
+*********************************************************************************************************/
+void EINT2_IRQHandler (void)
+{
+  LPC_SC->EXTINT = (0x01 << 2);                                              /* 清除外部中断标志             */ 
+  /*******************中断函数*********************/
+	
+	/*******************中断函数*********************/
+}
+
+/*********************************************************************************************************
+* Function Name:        EINT3_IRQHandler
+* Description:          外部中断3中断处理函数
+* Input:                无
+* Output:               无
+* Return:               无
+*********************************************************************************************************/
+void EINT3_IRQHandler (void)
+{
+  LPC_SC->EXTINT = (0x01 << 3);                                              /* 清除外部中断标志             */ 
+  /*******************中断函数*********************/
+	
+	
+	
+	/*******************中断函数*********************/
+}
+/*****************************************************************************
+**                            End Of File
+******************************************************************************/
